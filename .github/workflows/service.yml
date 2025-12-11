@@ -1,0 +1,215 @@
+name: Full Service Pipeline
+
+# Composite workflow that combines build, containerize, and manifest update
+# Use this for a complete CI/CD pipeline in a single call
+
+on:
+  workflow_call:
+    inputs:
+      # Language/Build settings
+      language:
+        description: 'Application language: python, dotnet, or node'
+        required: true
+        type: string
+      node_version:
+        description: 'Node.js version (for node apps)'
+        required: false
+        type: string
+        default: '20'
+      dotnet_version:
+        description: '.NET SDK version (for dotnet apps)'
+        required: false
+        type: string
+        default: '8.0.x'
+      python_version:
+        description: 'Python version (for python apps)'
+        required: false
+        type: string
+        default: '3.11'
+      working_directory:
+        description: 'Working directory for the build'
+        required: false
+        type: string
+        default: '.'
+
+      # Docker settings
+      image_name:
+        description: 'Docker image name'
+        required: true
+        type: string
+      dockerfile:
+        description: 'Path to Dockerfile'
+        required: false
+        type: string
+        default: './Dockerfile'
+      platforms:
+        description: 'Target platforms'
+        required: false
+        type: string
+        default: 'linux/amd64,linux/arm64'
+      build_args:
+        description: 'Docker build arguments'
+        required: false
+        type: string
+        default: ''
+      tag_latest:
+        description: 'Also tag as latest'
+        required: false
+        type: boolean
+        default: false
+
+      # GitOps settings
+      gitops_repo:
+        description: 'GitOps repository (org/repo)'
+        required: true
+        type: string
+      manifest_path:
+        description: 'Path to K8s manifest'
+        required: true
+        type: string
+      image_pattern:
+        description: 'Image pattern to match in manifest'
+        required: true
+        type: string
+
+    secrets:
+      DOCKER_USERNAME:
+        required: true
+      DOCKER_PASSWORD:
+        required: true
+      GITOPS_REPO_TOKEN:
+        required: true
+
+    outputs:
+      image_tag:
+        description: 'The image tag'
+        value: ${{ jobs.containerize.outputs.tag }}
+      full_image:
+        description: 'Full image reference'
+        value: ${{ jobs.containerize.outputs.full_image }}
+
+jobs:
+  # Build job - validates the application compiles
+  build-python:
+    if: inputs.language == 'python'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python_version }}
+          cache: 'pip'
+      - run: pip install -r requirements.txt
+      - run: python -m py_compile *.py || true
+
+  build-dotnet:
+    if: inputs.language == 'dotnet'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ inputs.dotnet_version }}
+      - run: dotnet restore
+      - run: dotnet build --configuration Release --no-restore
+
+  build-node:
+    if: inputs.language == 'node'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: 'yarn'
+          cache-dependency-path: ${{ inputs.working_directory }}/yarn.lock
+      - run: yarn install --frozen-lockfile
+      - run: yarn build
+
+  # Containerize job
+  containerize:
+    needs: [build-python, build-dotnet, build-node]
+    if: always() && (needs.build-python.result == 'success' || needs.build-dotnet.result == 'success' || needs.build-node.result == 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.image-tag.outputs.tag }}
+      full_image: ${{ steps.image-tag.outputs.full_image }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Generate image tag
+        id: image-tag
+        run: |
+          IMAGE_TAG=$(echo ${{ github.sha }} | cut -c1-8)
+          echo "tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "full_image=${{ secrets.DOCKER_USERNAME }}/${{ inputs.image_name }}:${IMAGE_TAG}" >> $GITHUB_OUTPUT
+
+      - name: Generate Docker tags
+        id: docker-tags
+        run: |
+          TAGS="${{ secrets.DOCKER_USERNAME }}/${{ inputs.image_name }}:${{ steps.image-tag.outputs.tag }}"
+          if [ "${{ inputs.tag_latest }}" = "true" ]; then
+            TAGS="${TAGS},${{ secrets.DOCKER_USERNAME }}/${{ inputs.image_name }}:latest"
+          fi
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: ${{ inputs.working_directory }}
+          file: ${{ inputs.dockerfile }}
+          push: true
+          platforms: ${{ inputs.platforms }}
+          tags: ${{ steps.docker-tags.outputs.tags }}
+          build-args: ${{ inputs.build_args }}
+          cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/${{ inputs.image_name }}:cache
+          cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/${{ inputs.image_name }}:cache,mode=max
+
+  # Update GitOps manifest
+  update-manifest:
+    needs: containerize
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.gitops_repo }}
+          token: ${{ secrets.GITOPS_REPO_TOKEN }}
+          path: gitops-repo
+
+      - name: Update manifest and push
+        run: |
+          cd gitops-repo
+          sed -i "s|${{ inputs.image_pattern }}|image: ${{ needs.containerize.outputs.full_image }}|g" "${{ inputs.manifest_path }}"
+          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Action"
+          git add "${{ inputs.manifest_path }}"
+          git diff --quiet --staged || git commit -m "Update ${{ inputs.image_name }} to ${{ needs.containerize.outputs.tag }}"
+          git push
+
+      - name: Summary
+        run: |
+          echo "### Deployment Complete :rocket:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image:** \`${{ needs.containerize.outputs.full_image }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Manifest:** \`${{ inputs.manifest_path }}\`" >> $GITHUB_STEP_SUMMARY

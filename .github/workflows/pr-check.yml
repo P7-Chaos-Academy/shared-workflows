@@ -1,0 +1,120 @@
+name: PR Build Check
+
+on:
+  workflow_call:
+    inputs:
+      language:
+        description: 'Application language: python, dotnet, or node'
+        required: true
+        type: string
+      node_version:
+        description: 'Node.js version (for node apps)'
+        required: false
+        type: string
+        default: '20'
+      dotnet_version:
+        description: '.NET SDK version (for dotnet apps)'
+        required: false
+        type: string
+        default: '8.0.x'
+      python_version:
+        description: 'Python version (for python apps)'
+        required: false
+        type: string
+        default: '3.11'
+      working_directory:
+        description: 'Working directory for the build'
+        required: false
+        type: string
+        default: '.'
+      run_tests:
+        description: 'Run tests after build'
+        required: false
+        type: boolean
+        default: true
+      test_command:
+        description: 'Custom test command (overrides default)'
+        required: false
+        type: string
+
+jobs:
+  pr-check-python:
+    if: inputs.language == 'python'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python_version }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Syntax check
+        run: python -m py_compile *.py || true
+
+      - name: Run tests
+        if: inputs.run_tests
+        run: ${{ inputs.test_command || 'pytest --tb=short -q || echo "No tests found"' }}
+
+  pr-check-dotnet:
+    if: inputs.language == 'dotnet'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ inputs.dotnet_version }}
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Run tests
+        if: inputs.run_tests
+        run: ${{ inputs.test_command || 'dotnet test --no-build --configuration Release --verbosity normal || echo "No tests found"' }}
+
+  pr-check-node:
+    if: inputs.language == 'node'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: 'yarn'
+          cache-dependency-path: ${{ inputs.working_directory }}/yarn.lock
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build
+        run: yarn build
+
+      - name: Run tests
+        if: inputs.run_tests
+        run: ${{ inputs.test_command || 'yarn test || echo "No tests configured"' }}

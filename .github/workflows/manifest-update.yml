@@ -1,0 +1,111 @@
+name: Update GitOps Manifest
+
+on:
+  workflow_call:
+    inputs:
+      gitops_repo:
+        description: 'GitOps repository (org/repo format)'
+        required: true
+        type: string
+      manifest_path:
+        description: 'Path to the Kubernetes manifest file to update'
+        required: true
+        type: string
+      image_pattern:
+        description: 'Regex pattern to match the image line (e.g., "image: cgamel/my-app:.*")'
+        required: true
+        type: string
+      new_image:
+        description: 'New full image reference to set'
+        required: true
+        type: string
+      commit_message:
+        description: 'Git commit message'
+        required: false
+        type: string
+        default: ''
+      git_user_name:
+        description: 'Git user name for the commit'
+        required: false
+        type: string
+        default: 'GitHub Action'
+      git_user_email:
+        description: 'Git user email for the commit'
+        required: false
+        type: string
+        default: 'action@github.com'
+    secrets:
+      GITOPS_REPO_TOKEN:
+        description: 'PAT with write access to the gitops repository'
+        required: true
+
+jobs:
+  update-manifest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout GitOps repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.gitops_repo }}
+          token: ${{ secrets.GITOPS_REPO_TOKEN }}
+          path: gitops-repo
+
+      - name: Extract image tag
+        id: extract-tag
+        run: |
+          # Extract tag from full image reference
+          TAG=$(echo "${{ inputs.new_image }}" | sed 's/.*://')
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+
+      - name: Update Kubernetes manifest
+        run: |
+          cd gitops-repo
+
+          # Check if manifest file exists
+          if [ ! -f "${{ inputs.manifest_path }}" ]; then
+            echo "::error::Manifest file not found: ${{ inputs.manifest_path }}"
+            exit 1
+          fi
+
+          # Perform the replacement
+          sed -i "s|${{ inputs.image_pattern }}|image: ${{ inputs.new_image }}|g" "${{ inputs.manifest_path }}"
+
+          # Verify the change was made
+          if grep -q "${{ inputs.new_image }}" "${{ inputs.manifest_path }}"; then
+            echo "Successfully updated image to ${{ inputs.new_image }}"
+          else
+            echo "::warning::Image pattern may not have matched. Please verify the manifest."
+          fi
+
+      - name: Commit and push changes
+        run: |
+          cd gitops-repo
+
+          git config --global user.email "${{ inputs.git_user_email }}"
+          git config --global user.name "${{ inputs.git_user_name }}"
+
+          # Check if there are changes to commit
+          if git diff --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          git add "${{ inputs.manifest_path }}"
+
+          # Use custom message or generate default
+          COMMIT_MSG="${{ inputs.commit_message }}"
+          if [ -z "$COMMIT_MSG" ]; then
+            COMMIT_MSG="Update image to ${{ steps.extract-tag.outputs.tag }}"
+          fi
+
+          git commit -m "$COMMIT_MSG"
+          git push
+
+      - name: Output summary
+        run: |
+          echo "### GitOps Manifest Updated :rocket:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository:** \`${{ inputs.gitops_repo }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Manifest:** \`${{ inputs.manifest_path }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **New Image:** \`${{ inputs.new_image }}\`" >> $GITHUB_STEP_SUMMARY

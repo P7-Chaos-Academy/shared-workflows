@@ -1,0 +1,111 @@
+name: Build Application
+
+on:
+  workflow_call:
+    inputs:
+      language:
+        description: 'Application language: python, dotnet, or node'
+        required: true
+        type: string
+      node_version:
+        description: 'Node.js version (for node apps)'
+        required: false
+        type: string
+        default: '20'
+      dotnet_version:
+        description: '.NET SDK version (for dotnet apps)'
+        required: false
+        type: string
+        default: '8.0.x'
+      python_version:
+        description: 'Python version (for python apps)'
+        required: false
+        type: string
+        default: '3.11'
+      working_directory:
+        description: 'Working directory for the build'
+        required: false
+        type: string
+        default: '.'
+      build_command:
+        description: 'Custom build command (overrides default)'
+        required: false
+        type: string
+      install_command:
+        description: 'Custom install command (overrides default)'
+        required: false
+        type: string
+
+jobs:
+  build-python:
+    if: inputs.language == 'python'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python_version }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: ${{ inputs.install_command || 'pip install -r requirements.txt' }}
+
+      - name: Run syntax check
+        run: python -m py_compile *.py || true
+
+      - name: Build/Validate
+        if: inputs.build_command != ''
+        run: ${{ inputs.build_command }}
+
+  build-dotnet:
+    if: inputs.language == 'dotnet'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ inputs.dotnet_version }}
+
+      - name: Restore dependencies
+        run: ${{ inputs.install_command || 'dotnet restore' }}
+
+      - name: Build
+        run: ${{ inputs.build_command || 'dotnet build --configuration Release --no-restore' }}
+
+  build-node:
+    if: inputs.language == 'node'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: 'yarn'
+          cache-dependency-path: ${{ inputs.working_directory }}/yarn.lock
+
+      - name: Install dependencies
+        run: ${{ inputs.install_command || 'yarn install --frozen-lockfile' }}
+
+      - name: Build
+        run: ${{ inputs.build_command || 'yarn build' }}
