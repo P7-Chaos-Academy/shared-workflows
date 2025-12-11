@@ -85,12 +85,6 @@ jobs:
           git config --global user.email "${{ inputs.git_user_email }}"
           git config --global user.name "${{ inputs.git_user_name }}"
 
-          # Check if there are changes to commit
-          if git diff --quiet; then
-            echo "No changes to commit"
-            exit 0
-          fi
-
           git add "${{ inputs.manifest_path }}"
 
           # Use custom message or generate default
@@ -99,7 +93,7 @@ jobs:
             COMMIT_MSG="Update image to ${{ steps.extract-tag.outputs.tag }}"
           fi
 
-          git commit -m "$COMMIT_MSG"
+          git commit -m "$COMMIT_MSG" --allow-empty
           git push
 
       - name: Output summary
