@@ -38,17 +38,21 @@ jobs:
           path: gitops-repo
 
       - name: Update and push
+        env:
+          NEW_IMAGE: ${{ inputs.new_image }}
+          MANIFEST_PATH: ${{ inputs.manifest_path }}
+          COMMIT_MESSAGE: ${{ inputs.commit_message }}
         run: |
           cd gitops-repo
 
-          # Extract image name without tag (escape / for sed)
-          IMAGE_NAME=$(echo "${{ inputs.new_image }}" | sed 's/:.*$//' | sed 's/\//\\\//g')
+          # Extract image name without tag
+          IMAGE_NAME=$(echo "$NEW_IMAGE" | sed 's/:.*$//')
 
           # Replace image line matching the image name
-          sed -i "s/^\([[:space:]]*\)image:[[:space:]]*${IMAGE_NAME}.*/\1image: ${{ inputs.new_image }}/" "${{ inputs.manifest_path }}"
+          sed -i "s|image: ${IMAGE_NAME}:.*|image: ${NEW_IMAGE}|g" "$MANIFEST_PATH"
 
           git config user.email "action@github.com"
           git config user.name "GitHub Action"
-          git add "${{ inputs.manifest_path }}"
-          git commit -m "${{ inputs.commit_message }}" --allow-empty
+          git add "$MANIFEST_PATH"
+          git commit -m "$COMMIT_MESSAGE" --allow-empty
           git push
