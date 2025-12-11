@@ -140,9 +140,6 @@ jobs:
     needs: [build-python, build-dotnet, build-node]
     if: always() && (needs.build-python.result == 'success' || needs.build-dotnet.result == 'success' || needs.build-node.result == 'success')
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
     outputs:
       tag: ${{ steps.image-tag.outputs.tag }}
       full_image: ${{ steps.image-tag.outputs.full_image }}

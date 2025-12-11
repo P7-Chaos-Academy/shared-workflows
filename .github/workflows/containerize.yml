@@ -60,9 +60,6 @@ on:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
     outputs:
       tag: ${{ steps.image-tag.outputs.tag }}
       full_image: ${{ steps.image-tag.outputs.full_image }}
