@@ -57,6 +57,10 @@ on:
         required: false
         type: boolean
         default: false
+      registry_username:
+        description: 'Docker registry username (for image naming in outputs)'
+        required: true
+        type: string
 
       # GitOps settings
       gitops_repo:
@@ -65,10 +69,6 @@ on:
         type: string
       manifest_path:
         description: 'Path to K8s manifest'
-        required: true
-        type: string
-      image_pattern:
-        description: 'Image pattern to match in manifest'
         required: true
         type: string
 
@@ -161,14 +161,14 @@ jobs:
         run: |
           IMAGE_TAG=$(echo ${{ github.sha }} | cut -c1-8)
           echo "tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
-          echo "full_image=${{ secrets.DOCKER_USERNAME }}/${{ inputs.image_name }}:${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "full_image=${{ inputs.registry_username }}/${{ inputs.image_name }}:${IMAGE_TAG}" >> $GITHUB_OUTPUT
 
       - name: Generate Docker tags
         id: docker-tags
         run: |
-          TAGS="${{ secrets.DOCKER_USERNAME }}/${{ inputs.image_name }}:${{ steps.image-tag.outputs.tag }}"
+          TAGS="${{ inputs.registry_username }}/${{ inputs.image_name }}:${{ steps.image-tag.outputs.tag }}"
           if [ "${{ inputs.tag_latest }}" = "true" ]; then
-            TAGS="${TAGS},${{ secrets.DOCKER_USERNAME }}/${{ inputs.image_name }}:latest"
+            TAGS="${TAGS},${{ inputs.registry_username }}/${{ inputs.image_name }}:latest"
           fi
           echo "tags=${TAGS}" >> $GITHUB_OUTPUT
 
@@ -180,8 +180,8 @@ jobs:
           platforms: ${{ inputs.platforms }}
           tags: ${{ steps.docker-tags.outputs.tags }}
           build-args: ${{ inputs.build_args }}
-          cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/${{ inputs.image_name }}:cache
-          cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/${{ inputs.image_name }}:cache,mode=max
+          cache-from: type=registry,ref=${{ inputs.registry_username }}/${{ inputs.image_name }}:cache
+          cache-to: type=registry,ref=${{ inputs.registry_username }}/${{ inputs.image_name }}:cache,mode=max
 
   # Update GitOps manifest
   update-manifest:
@@ -196,13 +196,20 @@ jobs:
           path: gitops-repo
 
       - name: Update manifest and push
+        env:
+          NEW_IMAGE: ${{ needs.containerize.outputs.full_image }}
+          MANIFEST_PATH: ${{ inputs.manifest_path }}
+          IMAGE_NAME: ${{ inputs.image_name }}
+          IMAGE_TAG: ${{ needs.containerize.outputs.tag }}
         run: |
           cd gitops-repo
-          sed -i "s|${{ inputs.image_pattern }}|image: ${{ needs.containerize.outputs.full_image }}|g" "${{ inputs.manifest_path }}"
+          # Extract image name without tag (everything before the colon)
+          IMAGE_BASE="${NEW_IMAGE%:*}"
+          sed -i "s|image: ${IMAGE_BASE}:.*|image: ${NEW_IMAGE}|g" "$MANIFEST_PATH"
           git config --global user.email "action@github.com"
           git config --global user.name "GitHub Action"
-          git add "${{ inputs.manifest_path }}"
-          git diff --quiet --staged || git commit -m "Update ${{ inputs.image_name }} to ${{ needs.containerize.outputs.tag }}"
+          git add "$MANIFEST_PATH"
+          git commit -m "Update ${IMAGE_NAME} to ${IMAGE_TAG}" --allow-empty
           git push
 
       - name: Summary

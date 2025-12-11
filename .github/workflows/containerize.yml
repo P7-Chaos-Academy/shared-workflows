@@ -42,6 +42,10 @@ on:
         required: false
         type: boolean
         default: true
+      registry_username:
+        description: 'Docker registry username (for image naming in outputs)'
+        required: true
+        type: string
     secrets:
       DOCKER_USERNAME:
         description: 'Docker Hub username'
@@ -88,14 +92,14 @@ jobs:
         run: |
           IMAGE_TAG=$(echo ${{ github.sha }} | cut -c1-8)
           echo "tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
-          echo "full_image=${{ secrets.DOCKER_USERNAME }}/${{ inputs.image_name }}:${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "full_image=${{ inputs.registry_username }}/${{ inputs.image_name }}:${IMAGE_TAG}" >> $GITHUB_OUTPUT
 
       - name: Generate Docker tags
         id: docker-tags
         run: |
-          TAGS="${{ secrets.DOCKER_USERNAME }}/${{ inputs.image_name }}:${{ steps.image-tag.outputs.tag }}"
+          TAGS="${{ inputs.registry_username }}/${{ inputs.image_name }}:${{ steps.image-tag.outputs.tag }}"
           if [ "${{ inputs.tag_latest }}" = "true" ]; then
-            TAGS="${TAGS},${{ secrets.DOCKER_USERNAME }}/${{ inputs.image_name }}:latest"
+            TAGS="${TAGS},${{ inputs.registry_username }}/${{ inputs.image_name }}:latest"
           fi
           echo "tags=${TAGS}" >> $GITHUB_OUTPUT
 
@@ -126,8 +130,8 @@ jobs:
           platforms: ${{ inputs.platforms }}
           tags: ${{ steps.docker-tags.outputs.tags }}
           build-args: ${{ steps.build-args.outputs.args }}
-          cache-from: ${{ inputs.cache_enabled && format('type=registry,ref={0}/{1}:cache', secrets.DOCKER_USERNAME, inputs.image_name) || '' }}
-          cache-to: ${{ inputs.cache_enabled && format('type=registry,ref={0}/{1}:cache,mode=max', secrets.DOCKER_USERNAME, inputs.image_name) || '' }}
+          cache-from: ${{ inputs.cache_enabled && format('type=registry,ref={0}/{1}:cache', inputs.registry_username, inputs.image_name) || '' }}
+          cache-to: ${{ inputs.cache_enabled && format('type=registry,ref={0}/{1}:cache,mode=max', inputs.registry_username, inputs.image_name) || '' }}
 
       - name: Output image info
         run: |
