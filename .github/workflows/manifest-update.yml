@@ -45,11 +45,21 @@ jobs:
         run: |
           cd gitops-repo
 
-          # Extract image name without tag
-          IMAGE_NAME=$(echo "$NEW_IMAGE" | sed 's/:.*$//')
+          # Debug: show input values
+          echo "NEW_IMAGE: $NEW_IMAGE"
+          echo "MANIFEST_PATH: $MANIFEST_PATH"
+          echo "Current manifest content:"
+          cat "$MANIFEST_PATH"
+
+          # Extract image name without tag (everything before the colon)
+          IMAGE_NAME="${NEW_IMAGE%:*}"
+          echo "IMAGE_NAME: $IMAGE_NAME"
 
           # Replace image line matching the image name
           sed -i "s|image: ${IMAGE_NAME}:.*|image: ${NEW_IMAGE}|g" "$MANIFEST_PATH"
+
+          echo "Updated manifest content:"
+          cat "$MANIFEST_PATH"
 
           git config user.email "action@github.com"
           git config user.name "GitHub Action"
