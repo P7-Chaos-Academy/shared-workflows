@@ -49,6 +49,9 @@ on:
       DOCKER_PASSWORD:
         description: 'Docker Hub password/token'
         required: true
+      BUILD_SECRETS:
+        description: 'Secret build arguments (newline-separated KEY=VALUE pairs)'
+        required: false
     outputs:
       image_tag:
         description: 'The short SHA tag used for the image'
@@ -96,6 +99,24 @@ jobs:
           fi
           echo "tags=${TAGS}" >> $GITHUB_OUTPUT
 
+      - name: Prepare build args
+        id: build-args
+        run: |
+          # Combine regular build args and secret build args
+          ARGS="${{ inputs.build_args }}"
+          if [ -n "${{ secrets.BUILD_SECRETS }}" ]; then
+            if [ -n "$ARGS" ]; then
+              ARGS="${ARGS}
+          ${{ secrets.BUILD_SECRETS }}"
+            else
+              ARGS="${{ secrets.BUILD_SECRETS }}"
+            fi
+          fi
+          # Use delimiter for multiline output
+          echo "args<<EOF" >> $GITHUB_OUTPUT
+          echo "$ARGS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Build and push image
         uses: docker/build-push-action@v5
         with:
@@ -104,7 +125,7 @@ jobs:
           push: ${{ inputs.push }}
           platforms: ${{ inputs.platforms }}
           tags: ${{ steps.docker-tags.outputs.tags }}
-          build-args: ${{ inputs.build_args }}
+          build-args: ${{ steps.build-args.outputs.args }}
           cache-from: ${{ inputs.cache_enabled && format('type=registry,ref={0}/{1}:cache', secrets.DOCKER_USERNAME, inputs.image_name) || '' }}
           cache-to: ${{ inputs.cache_enabled && format('type=registry,ref={0}/{1}:cache,mode=max', secrets.DOCKER_USERNAME, inputs.image_name) || '' }}
 
