@@ -46,7 +46,9 @@ jobs:
           cd gitops-repo
 
           # Debug: show input values
-          echo "NEW_IMAGE: $NEW_IMAGE"
+          echo "inputs.new_image raw: ${{ inputs.new_image }}"
+          echo "NEW_IMAGE env var: $NEW_IMAGE"
+          echo "NEW_IMAGE length: ${#NEW_IMAGE}"
           echo "MANIFEST_PATH: $MANIFEST_PATH"
           echo "Current manifest content:"
           cat "$MANIFEST_PATH"

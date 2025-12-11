@@ -89,10 +89,15 @@ jobs:
 
       - name: Generate image tag
         id: image-tag
+        env:
+          REG_USER: ${{ inputs.registry_username }}
+          IMG_NAME: ${{ inputs.image_name }}
         run: |
           IMAGE_TAG=$(echo ${{ github.sha }} | cut -c1-8)
+          FULL_IMG="${REG_USER}/${IMG_NAME}:${IMAGE_TAG}"
           echo "tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
-          echo "full_image=${{ inputs.registry_username }}/${{ inputs.image_name }}:${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "full_image=${FULL_IMG}" >> $GITHUB_OUTPUT
+          echo "Debug - constructed image: ${FULL_IMG}"
 
       - name: Generate Docker tags
         id: docker-tags
